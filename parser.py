@@ -1,10 +1,8 @@
 import os
 from lxml import etree
 import requests
+
 url = "https://cvs.khronos.org/svn/repos/ogl/trunk/doc/registry/public/api/"
-#parser = etree.XMLParser(remove_comments=True)
-#et = etree.parse("egl.xml", parser=parser)
-#root = et.getroot()
 
 
 class Types(object):
@@ -113,9 +111,9 @@ class Parser(object):
                 enums.append(Enums(e.attrib.get('namespace'), i.attrib.get('name'), i.attrib.get('value')))
         return enums
 
-    def gen_cons(self):
+    def gen_cons(self, api):
         nspace = {}
-        with open(self.fname.split(".")[0] + '_constants.py', 'w+') as cons:
+        with open(os.path.join(api.upper(), 'constants.py'), 'w+') as cons:
             for x in self.get_enums():
                 nspace.setdefault(x.namespace, []).append(x.__str__())
             for k, v in nspace.items():
@@ -185,8 +183,7 @@ class Parser(object):
                 ext_dir_list.append(ext_vendor)
         self.create_ext_dirs(api, ext_dir_list)
         return ext
-                
-                    
+
 
     def khronos(self):
         khr_defs = ["typedef int32_t                khronos_int32_t;\n",
@@ -287,4 +284,6 @@ class Parser(object):
 
 if __name__ == '__main__':
     p = Parser(fname='glx.xml')
-    p.gen_extension(api='glx')
+    p.gen_cons('glx')
+    
+
