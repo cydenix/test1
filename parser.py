@@ -262,12 +262,5 @@ class Parser(object):
 
 
 if __name__ == '__main__':
-    p = Parser(fname="egl.xml")
-    ext_dir_list= []
-    for e in p.root.findall("extensions/extension"):
-        ext_vendor = e.attrib.get('name').split("_")[1]
-        ext_name = '_'.join(e.attrib.get('name').split("_")[2:])
-        if ext_vendor not in ext_dir_list:
-            ext_dir_list.append(ext_vendor)
-
-    print ext_dir_list
+    p = Parser(fname="glx.xml")
+    p.gen_ffi(api='glx')
