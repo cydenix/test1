@@ -59,7 +59,7 @@ class Feature(object):
 
 
 class Extension(object):
-    __slots__ = ['name', 'req']
+    __slots__ = ['vendor','name', 'req']
 
     def __init__(self, vendor, name, req):
         self.vendor = vendor
@@ -163,6 +163,32 @@ class Parser(object):
                 flist.append(Feature(api, f.attrib.get('name'), [r for r in f]))
         return flist
 
+    @staticmethod
+    def create_ext_dirs(path, dirs):
+        if os.path.isdir(path.upper()):
+            for d in dirs:
+                if not os.path.isdir(os.path.join(path.upper(), d)):
+                    os.mkdir(os.path.join(path.upper(), d))
+
+
+    def gen_extension(self, api=None):
+        ext_dir_list = []
+        ext = {}
+        for e in self.root.findall("extensions/extension"):
+            ext_vendor = e.attrib.get('name').split("_")[1]
+            ext_name = '_'.join(e.attrib.get('name').split("_")[2:])
+            extclass = Extension(ext_vendor, ext_name, [r for r in e.findall('require')])
+            ext.setdefault(ext_vendor, []).append(extclass)
+            #if os.path.exists(os.path.join(api.upper(), ext_vendor)):
+            #    os.mknod(os.path.join(api.upper(), ext_vendor, ext_name + ".py"))
+            if ext_vendor not in ext_dir_list:
+                ext_dir_list.append(ext_vendor)
+        self.create_ext_dirs(api, ext_dir_list)
+        for k, v in ext.items():
+            print k, [c.name for c in v]
+                
+                    
+
     def khronos(self):
         khr_defs = ["typedef int32_t                khronos_int32_t;\n",
                     "typedef uint32_t               khronos_uint32_t;\n",
@@ -260,7 +286,6 @@ class Parser(object):
 
             f.write("'''\n")
 
-
 if __name__ == '__main__':
-    p = Parser(fname="glx.xml")
-    p.gen_ffi(api='glx')
+    p = Parser(fname='glx.xml')
+    p.gen_extension(api='glx')
