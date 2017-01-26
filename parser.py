@@ -184,8 +184,7 @@ class Parser(object):
             if ext_vendor not in ext_dir_list:
                 ext_dir_list.append(ext_vendor)
         self.create_ext_dirs(api, ext_dir_list)
-        for k, v in ext.items():
-            print k, [c.name for c in v]
+        return ext
                 
                     
 
