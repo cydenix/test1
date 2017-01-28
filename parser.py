@@ -3,6 +3,8 @@ from lxml import etree
 import requests
 
 url = "https://cvs.khronos.org/svn/repos/ogl/trunk/doc/registry/public/api/"
+dpath = os.path.join(os.path.abspath('.'), "Registry")
+hpath = os.path.join(os.path.abspath('.'), "Headers")
 
 
 class Types(object):
@@ -57,12 +59,14 @@ class Feature(object):
 
 
 class Extension(object):
-    __slots__ = ['vendor','name', 'req']
+    __slots__ = ['api', 'vendor', 'name', 'req']
 
-    def __init__(self, vendor, name, req):
+    def __init__(self, api, vendor, name, req):
+        self.api = api
         self.vendor = vendor
         self.name = name
         self.req = req
+
 
 
 class Parser(object):
@@ -70,42 +74,62 @@ class Parser(object):
         self.fname = fname
         self.parser = etree.XMLParser(remove_comments=True)
         if self.fname is not None:
-            if not os.path.isfile(self.fname):
+            if not os.path.isfile(os.path.join(dpath, self.fname)):
                 self.get_file()
 
-            self.et = etree.parse(self.fname, parser=self.parser)
+            self.et = etree.parse(os.path.join(dpath, self.fname),
+                                  parser=self.parser)
             self.root = self.et.getroot()
+            self.cmd_lst = None
+
+    @staticmethod
+    def create_ext_dirs(path, dirs):
+        if os.path.isdir(path.upper()):
+            for d in dirs:
+                if not os.path.isdir(os.path.join(path.upper(), d)):
+                    os.mkdir(os.path.join(path.upper(), d))
+
+    @staticmethod
+    def write_header(header, fileObj):
+        with open(os.path.join(hpath, header), "r") as h:
+            for l in h.readlines():
+                fileObj.write(l)
+
+    @staticmethod
+    def write_commands(cmd_dict, dictObj, fileObj):
+        for v in dictObj.values():
+            for x in v:
+                for cmd in cmd_dict.keys():
+                    if cmd in x.req:
+                        fileObj.write(cmd_dict[cmd].__str__() + '\n')
 
     def get_file(self):
         req = requests.get(url + self.fname, stream=True)
-        print "Downloading ... % s" %(self.fname)
-        with open(self.fname, 'wb') as f:
+        print "Downloading ... % s" % (self.fname)
+        with open(os.path.join(dpath, self.fname), 'wb') as f:
             f.write(req.raw.read())
         del req
 
-    def gen_types(self, api=None):
+    def get_types(self, api=None):
         types = {}
         for t in self.root.findall('types/type'):
             api_name = self.fname.split('.')[0] if t.attrib.get('api') is None else t.attrib.get('api')
             if not t.attrib.get('name') and t.text is not None:
-                types.setdefault(api_name, []).append(Types(api=api_name,
-                                                            requires=None,
-                                                            typedef=t.text,
-                                                            name=t.find('name').text,
-                                                            tail=t.find('name').tail))
+                typeObj = Types(api_name, None, t.text,
+                                t.find('name').text,
+                                t.find('name').tail)
+                types.setdefault(api_name, []).append(typeObj)
             elif t.text is None and t.find('name') is not None:
-                types.setdefault(api_name, []).append(Types(api=api_name,
-                                                            requires=None,
-                                                            typedef=None,
-                                                            name=t.find('name').text,
-                                                            tail=t.find('name').tail))
+                typeObj = Types(api_name, None, None,
+                                t.find('name').text,
+                                t.find('name').tail)
+                types.setdefault(api_name, []).append(typeObj)
             else:
                 types.setdefault("dummy", []).append(t.attrib.get('name'))
         return types
 
     def get_enums(self):
         enums = []
-        cdef = []
         for e in self.root.findall('enums'):
             for i in e.findall('enum'):
                 enums.append(Enums(e.attrib.get('namespace'), i.attrib.get('name'), i.attrib.get('value')))
@@ -125,7 +149,7 @@ class Parser(object):
     def get_commands(self):
         pname = str()
         ptype = str()
-        cmdlst = []
+        cmds = {}
         for c in self.root.findall("commands/command"):
             params = []
             if len(c.getchildren()) < 2:
@@ -151,100 +175,51 @@ class Parser(object):
                             prtype = e.text
                             prname = e.find('name').text
                         params.append(prtype + ' ' + prname)
-            cmdlst.append(Commands(ptype, pname, params))
-        return cmdlst
+            cmds[pname] = Commands(ptype, pname, params)
+        return cmds
 
     def get_feature(self, api=None):
-        flist = []
+        features = {}
         for f in self.root.findall("feature"):
-            if api and api == f.attrib.get('api'):
-                flist.append(Feature(api, f.attrib.get('name'), [r for r in f]))
-        return flist
+            api_name = f.attrib.get('api')
+            if api and api == api_name:
+                ftrclass = Feature(api, api_name, [(r.attrib.get('name')) for r in f.findall('require/command')])
+                features.setdefault(api_name, []).append(ftrclass)
+        return features
 
-    @staticmethod
-    def create_ext_dirs(path, dirs):
-        if os.path.isdir(path.upper()):
-            for d in dirs:
-                if not os.path.isdir(os.path.join(path.upper(), d)):
-                    os.mkdir(os.path.join(path.upper(), d))
-
-
-    def gen_extension(self, api=None):
+    def get_extension(self, api=None):
         ext_dir_list = []
         ext = {}
         for e in self.root.findall("extensions/extension"):
-            ext_vendor = e.attrib.get('name').split("_")[1]
-            ext_name = '_'.join(e.attrib.get('name').split("_")[2:])
-            extclass = Extension(ext_vendor, ext_name, [r for r in e.findall('require')])
-            ext.setdefault(ext_vendor, []).append(extclass)
-            #if os.path.exists(os.path.join(api.upper(), ext_vendor)):
-            #    os.mknod(os.path.join(api.upper(), ext_vendor, ext_name + ".py"))
-            if ext_vendor not in ext_dir_list:
-                ext_dir_list.append(ext_vendor)
+            api_name = e.attrib.get('supported').split('|')
+            if api and api in api_name:
+                ext_vendor = e.attrib.get('name').split("_")[1]
+                ext_name = '_'.join(e.attrib.get('name').split("_")[2:])
+                extclass = Extension(api, ext_vendor, ext_name, [(r.attrib.get('name')) for r in e.findall('require/command')])
+                ext.setdefault(ext_vendor, []).append(extclass)
+                if ext_vendor not in ext_dir_list:
+                    ext_dir_list.append(ext_vendor)
         self.create_ext_dirs(api, ext_dir_list)
         return ext
 
-
-    def khronos(self):
-        khr_defs = ["typedef int32_t                khronos_int32_t;\n",
-                    "typedef uint32_t               khronos_uint32_t;\n",
-                    "typedef int64_t                khronos_int64_t;\n",
-                    "typedef uint64_t               khronos_uint64_t;\n",
-                    "typedef signed   char          khronos_int8_t;\n",
-                    "typedef unsigned char          khronos_uint8_t;\n",
-                    "typedef signed   short int     khronos_int16_t;\n",
-                    "typedef unsigned short int     khronos_uint16_t;\n",
-                    "typedef signed   long  int     khronos_intptr_t;\n",
-                    "typedef unsigned long  int     khronos_uintptr_t;\n",
-                    "typedef signed   long  int     khronos_ssize_t;\n",
-                    "typedef unsigned long  int     khronos_usize_t;\n",
-                    "typedef          float         khronos_float_t;\n",
-                    "typedef khronos_uint64_t khronos_utime_nanoseconds_t;\n",
-                    "typedef khronos_int64_t  khronos_stime_nanoseconds_t;\n"]
-        return khr_defs
-
-    def xorg(self):
-        xorg_defs = ["typedef ... Display;\n",
-                     "typedef int Bool;\n",
-                     "typedef unsigned long XID;\n"
-                     "typedef XID Font;\n",
-                     "typedef XID Screen;\n",
-                     "typedef XID Status;\n",
-                     "typedef XID Window;\n",
-                     "typedef XID Pixmap;\n",
-                     "typedef XID XVisualInfo;\n",
-                     "typedef XID Colormap;\n"]
-        return xorg_defs
-
-    def xorg_xcb(self):
-        xorgxcb_defs = ["extern Display *XOpenDisplay(const char*);",
-                        "xcb_connection_t *XGetXCBConnection(Display *dpy);",
-                        "enum XEventQueueOwner { XlibOwnsEventQueue = 0, XCBOwnsEventQueue };",
-                        "void XSetEventQueueOwner(Display *dpy, enum XEventQueueOwner owner);"]
-        return xorgxcb_defs
-
-    def gen_ffi(self, api=None):
-        khr = self.khronos()
-        with open(self.fname.split(".")[0] + "defs.py", "w+") as f:
+    def gen_def(self, api=None):
+        defpath = os.path.join(os.path.abspath('.'), "Defs")
+        defname = api + "defs.py"
+        deffile = os.path.join(defpath, defname)
+        with open(deffile, "w+") as f:
             f.write("\n")
             f.write("DEF = '''\n")
-            for k in khr:
-                f.write(k)
+            self.write_header("khronos.h", f)
             f.write("\n")
-            if self.fname.split(".")[0] in ['egl', 'glx']:
-                for x in self.xorg():
-                    f.write(x)
-                for xc in self.xorg_xcb():
-                    f.write(xc + '\n')
-            f.write("\n")
-            if self.fname.split(".")[0] == 'egl':
+            if api and api in ['egl', 'glx']:
+                self.write_header("xorg.h", f)
+                f.write('\n')
+                self.write_header("xorg_xcb.h", f)
                 f.write("\n")
-                f.write("typedef Display *EGLNativeDisplayType;\n")
-                f.write("typedef Pixmap   EGLNativePixmapType;\n")
-                f.write("typedef Window   EGLNativeWindowType;")
-                f.write("typedef khronos_int32_t EGLint;\n")
+            if api == 'egl':
+                self.write_header("eglx11platform.h", f)
                 f.write("\n")
-            typs = self.gen_types()
+            typs = self.get_types()
             if api and api in ['glsc2', 'gles1', 'gles2']:
                 for t in typs['gl']:
                     for g in typs[api]:
@@ -264,26 +239,18 @@ class Parser(object):
             elif api:
                 for v in typs[api]:
                     f.write(v.__str__())
+                if "GLhandleARB" in typs['dummy']:
+                    f.write("typedef unsigned int GLhandleARB;\n")
             f.write("\n")
             cmd = self.get_commands()
-            ftr = self.get_feature(api='glx')
-
-            cmd_lst = []
-            for futr in ftr:
-                for rq in futr.req:
-                    if rq.findall('command'):
-                        for c in rq.findall('command'):
-                            if c.attrib.get('name') not in cmd_lst:
-                                cmd_lst.append(c.attrib.get('name'))
-            for x in cmd_lst:
-                for cm in cmd:
-                    if cm.name == x:
-                        f.write(cm.__str__() + "\n")
-
+            ftr = self.get_feature(api=api)
+            self.write_commands(cmd, ftr, f)
+            ext = self.get_extension(api=api)
+            self.write_commands(cmd, ext, f)
             f.write("'''\n")
+
 
 if __name__ == '__main__':
     p = Parser(fname='glx.xml')
-    p.gen_cons('glx')
-    
+    p.gen_def('glx')
 
