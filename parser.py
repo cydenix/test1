@@ -248,9 +248,3 @@ class Parser(object):
             ext = self.get_extension(api=api)
             self.write_commands(cmd, ext, f)
             f.write("'''\n")
-
-
-if __name__ == '__main__':
-    p = Parser(fname='glx.xml')
-    p.gen_def('glx')
-
