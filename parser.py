@@ -236,9 +236,6 @@ class Parser(object):
             f.write("'''\n")
 
 
-if __name__ == '__main__':
-    p = Parser(fname='glx.xml')
-    p.gen_def(api='glx')
 
 
 
