@@ -1,9 +1,7 @@
 import os
 from lxml import etree
-import requests
 
-url = "https://cvs.khronos.org/svn/repos/ogl/trunk/doc/registry/public/api/"
-dpath = os.path.join(os.path.abspath('.'), "Registry")
+
 hpath = os.path.join(os.path.abspath('.'), "Headers")
 
 
@@ -68,19 +66,14 @@ class Extension(object):
         self.req = req
 
 
-
 class Parser(object):
     def __init__(self, fname=None):
         self.fname = fname
         self.parser = etree.XMLParser(remove_comments=True)
-        if self.fname is not None:
-            if not os.path.isfile(os.path.join(dpath, self.fname)):
-                self.get_file()
-
-            self.et = etree.parse(os.path.join(dpath, self.fname),
-                                  parser=self.parser)
-            self.root = self.et.getroot()
-            self.cmd_lst = None
+        self.et = etree.parse(os.path.join("Registry", self.fname),
+                              parser=self.parser)
+        self.root = self.et.getroot()
+        self.cmd_lst = None
 
     @staticmethod
     def create_ext_dirs(path, dirs):
@@ -103,24 +96,19 @@ class Parser(object):
                 fileObj.write(l)
 
     @staticmethod
-    def write_commands(cmd_dict, dictObj, fileObj):
-        for v in dictObj.values():
-            for x in v:
-                for cmd in cmd_dict.keys():
-                    if cmd in x.req:
-                        fileObj.write(cmd_dict[cmd].__str__() + '\n')
+    def write_commands(cmdDict, ftrDict, extDict, fileObj):
+        flsts = [f.req for v in ftrDict.values() for f in v if len(f.req) > 0]
+        elsts = [e.req for v in extDict.values() for e in v if len(e.req) > 0]
+        cmdSet = set()
+        map(cmdSet.update, flsts + elsts)
+        for cmd in cmdDict.keys():
+            if cmd in cmdSet:
+                fileObj.write(cmdDict[cmd].__str__() + "\n")
 
-    def get_file(self):
-        req = requests.get(url + self.fname, stream=True)
-        print "Downloading ... % s" % (self.fname)
-        with open(os.path.join(dpath, self.fname), 'wb') as f:
-            f.write(req.raw.read())
-        del req
-
-    def get_types(self, api=None):
+    def get_types(self, api):
         types = {}
         for t in self.root.findall('types/type'):
-            api_name = self.fname.split('.')[0] if t.attrib.get('api') is None else t.attrib.get('api')
+            api_name = api if t.attrib.get('api') is None else t.attrib.get('api')
             if not t.attrib.get('name') and t.text is not None:
                 typeObj = Types(api_name, None, t.text,
                                 t.find('name').text,
@@ -145,6 +133,7 @@ class Parser(object):
     def gen_cons(self, api):
         nspace = {}
         with open(os.path.join(api.upper(), 'constants.py'), 'w+') as cons:
+            cons.write("# Auto generated file!\n")
             for x in self.get_enums():
                 nspace.setdefault(x.namespace, []).append(x.__str__())
             for k, v in nspace.items():
@@ -160,35 +149,34 @@ class Parser(object):
             ptype = ''.join([text for text in protos][:-1])
             pname = cmd.find('proto').find('name').text
             params = [''.join(param.itertext()) for param in cmd.iterfind('param')]
-            cmds.setdefault(pname, []).append(Commands(ptype, pname, params))
+            cmds[pname] = Commands(ptype, pname, params)
         return cmds
 
-
-
-    def get_feature(self, api=None):
+    def get_feature(self, api=None, ver=None):
         features = {}
-        for f in self.root.findall("feature"):
-            api_name = f.attrib.get('api')
-            if api and api == api_name:
-                ftrclass = Feature(api, api_name, [(r.attrib.get('name')) for r in f.findall('require/command')])
-                features.setdefault(api_name, []).append(ftrclass)
+        for f in self.root.iterfind("feature"):
+            ftr_api = f.get('api')
+            api_name = f.get('name')
+            api_no = f.get('number')
+            req = [c.attrib.get('name') for c in f.findall('require/command')]
+            if ftr_api == api and api_no <= ver:
+                ftrclass = Feature(ftr_api, api_name, req)
+                features.setdefault((ftr_api, api_name), []).append(ftrclass)
         return features
 
     def get_extension(self, api=None):
-        ext_dir_list = []
         ext = {}
         for e in self.root.findall("extensions/extension"):
             api_name = e.attrib.get('supported').split('|')
             if api and api in api_name:
                 ext_vendor = e.attrib.get('name').split("_")[1]
                 ext_name = '_'.join(e.attrib.get('name').split("_")[2:])
-                extclass = Extension(api, ext_vendor, ext_name, [(r.attrib.get('name')) for r in e.findall('require/command')])
+                ext_req = [(r.attrib.get('name')) for r in e.findall('require/command')]
+                extclass = Extension(api, ext_vendor, ext_name, ext_req)
                 ext.setdefault(ext_vendor, []).append(extclass)
-                if ext_vendor not in ext_dir_list:
-                    ext_dir_list.append(ext_vendor)
         return ext
 
-    def gen_def(self, api=None):
+    def gen_def(self, api=None, ver=None):
         defpath = os.path.join(os.path.abspath('.'), "Defs")
         defname = api + "defs.py"
         deffile = os.path.join(defpath, defname)
@@ -205,7 +193,7 @@ class Parser(object):
             if api == 'egl':
                 self.write_header("eglx11platform.h", f)
                 f.write("\n")
-            typs = self.get_types()
+            typs = self.get_types(api)
             if api and api in ['glsc2', 'gles1', 'gles2']:
                 for t in typs['gl']:
                     for g in typs[api]:
@@ -229,11 +217,17 @@ class Parser(object):
                     f.write("typedef unsigned int GLhandleARB;\n")
             f.write("\n")
             cmd = self.get_commands()
-            ftr = self.get_feature(api=api)
-            self.write_commands(cmd, ftr, f)
+            ftr = self.get_feature(api=api, ver=ver)
             ext = self.get_extension(api=api)
-            self.write_commands(cmd, ext, f)
+            f.write("/* Generated Commands for " + api + " Version " + ver + ". */\n")
+            self.write_commands(cmd, ftr, ext, f)
             f.write("'''\n")
+
+
+if __name__ == '__main__':
+    p = Parser(fname='gl.xml')
+    p.gen_def('gl', '4.5')
+
 
 
 
