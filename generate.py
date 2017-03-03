@@ -159,23 +159,11 @@ def gen_api_extfunc(api, enumLst, cmdDict, extDict):
 
 
 if __name__ == '__main__':
-
-    p = parser.Parser('egl.xml', 'egl', '1.5')
-    #for cmd in p.root.find('commands').iterfind('command'):
-    #    for param in cmd.findall('param'):
-    #        print ''.join(param.itertext()).replace("const", '')
-    #print [x.split()[-1:][0] for x in p.cdict["eglChooseConfig"].params if x.split()[-1:][0] is not "config_size"]
+           
+    create_dirs(GL_DIRS)
+    get_registry_files(GL_FILES)
     
-
-
-
-
-
-
-    gen_api_funcs('egl', p.endict, p.cdict, p.fdict)
-    #gen_api_extfunc('gles2', p.endict, p.cdict, p.edict)
-
-'''
+    p = parser.Parser('egl.xml', 'egl', '1.5')
     apis = {'egl': ['egl.xml', '1.5'],
             'glx': ['glx.xml', '1.4'],
             'gles1': ['gl.xml', '1.0'],
@@ -203,5 +191,5 @@ if __name__ == '__main__':
             ffi.cdef(globals()[k+'defs'].DEF)
         ffi.set_source("FFI/_{}ffi".format(k), None, libs)
         ffi.compile()
-'''
+
     
